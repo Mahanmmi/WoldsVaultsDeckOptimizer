@@ -35,8 +35,8 @@ try:
 except ImportError:
     _ndm_core = None
     _RUST_AVAILABLE = False
-    print("[ndm] Rust extension not found — using pure Python SA (run "
-          "'maturin develop --release' in ndm_core/ to enable Rust).")
+    print("[ndm] Rust extension not found — using pure Python SA "
+          "(run with 'uv run --extra rust optimize' to enable the Rust core).")
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Aliases
@@ -107,6 +107,27 @@ class CoreType(Enum):
     DELUXE_CORE = "deluxe_core"
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Mode selection (CLI)
+# ──────────────────────────────────────────────────────────────────────────────
+# `wolds`   → Wold's Vaults defaults (additive cores, positional shiny, deluxe).
+# `vanilla` → Vanilla preset: multiplicative core scaling, no positional shiny,
+#             and the deluxe card system disabled.
+import argparse as _argparse
+
+_mode_parser = _argparse.ArgumentParser(
+    description="Wold's Vaults / Vanilla NDM deck optimizer.",
+    add_help=True,
+)
+_mode_parser.add_argument(
+    "--mode",
+    choices=("wolds", "vanilla"),
+    default="wolds",
+    help="Optimizer preset: 'wolds' (default) or 'vanilla'.",
+)
+MODE: str = _mode_parser.parse_known_args()[0].mode
+_VANILLA: bool = MODE == "vanilla"
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Tunable multiplier constants
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -132,15 +153,15 @@ MULT_FOIL:        float = 2.8  # this is the shiny core
 MULT_STEADFAST:   float = 2.2
 MULT_COLOR:       float = 1.75
 
-ALLOW_DELUXE:            bool  = True
+ALLOW_DELUXE:            bool  = not _VANILLA   # vanilla: deluxe card system off
 MULT_DELUXE_FLAT:        float = 2   # flat NDM contribution per deluxe card
 MULT_DELUXE_CORE_BASE:   float = 1.0   # deluxe core intercept (fancy core)
 MULT_DELUXE_CORE_SCALE:  float = 0.2   # deluxe core multiplier per deluxe card
 
 GREED_ADDITIVE: bool = True  # True → greed multipliers on the same card are summed; False → multiplied
-ADDITIVE_CORES: bool = True  # True → core multipliers sum together; False → multiply
+ADDITIVE_CORES: bool = not _VANILLA  # vanilla: multiplicative core scaling
 
-SHINY_POSITIONAL: bool  = True    # False → shiny decks use flat T cards (pos=1) instead of R/C/S
+SHINY_POSITIONAL: bool  = not _VANILLA   # vanilla: shiny decks become pure stat decks (flat T cards)
 
 ENABLE_EXPERIMENTAL_EXPONENT: bool  = False # Experimental behavior for the balance core
 EXPERIMENTAL_EXPONENT:        float = 0.65   # 1.0 = no change; <1 penalises dominance; >1 rewards it

@@ -13,3 +13,6 @@ __pycache__/
 
 # Spreadsheet outputs
 *.xlsx
+
+# Python virtual environment
+.venv/
