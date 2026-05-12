@@ -1,0 +1,87 @@
+# NDM Optimizer configuration.
+#
+# Default values represent Wold's Vaults mode. The `modes:` section at the
+# bottom contains overrides applied when --mode <name> is selected (deep merge).
+# Add a new top-level mode by adding another key under `modes:`.
+
+# Use this for "extra" core slots you can add to a deck. By default, deckmod = 1
+# because you can use the core expertise in Wold's to add a free core when
+# crafting, and remove it later in dungeons. For experimental cores like the
+# balance core, reduce deckmod so every deck must reserve a slot for that core.
+deckmod: 1
+
+greed:
+  dir_vert:      5
+  dir_horiz:     5
+  evo:           0    # set > 0 to enable
+  surr:          0    # set > 0 to enable
+  dir_diag_up:   0    # NE / NW diagonal greed
+  dir_diag_down: 0    # SE / SW diagonal greed
+
+cores:
+  pure_base:   1.0
+  pure_scale:  0.1
+  equilibrium: 3.0
+  foil:        2.8    # the shiny core
+  steadfast:   2.2
+  color:       1.75
+
+deluxe:
+  allow:      true
+  flat:       2       # flat NDM contribution per deluxe card
+  core_base:  1.0     # deluxe (fancy) core intercept
+  core_scale: 0.2     # deluxe core multiplier per deluxe card
+
+stacking:
+  greed_additive: true   # true → greed multipliers on the same card sum;     false → multiply
+  additive_cores: true   # true → core multipliers sum together;             false → multiply
+
+shiny:
+  positional: true   # false → shiny decks become flat T cards (vanilla style)
+
+experimental:
+  enable_exponent: false   # experimental balance-core behavior
+  exponent: 0.65           # 1.0 = no change; <1 penalises dominance; >1 rewards it
+  boost:    0.4
+
+constraints:
+  deluxe_counted_as_regular: false   # false → deluxe cards don't satisfy min_regular
+
+display:
+  balance: true
+  heatmap: true
+
+metrics:
+  hns_q: 1.5    # Hill Number Score exponent
+  spread: false # noisy / experimental spread metric
+
+output:
+  export_spreadsheet: true
+  spreadsheet_prefix: "Panel_WV_Decks_"   # produces "{prefix}ndm_simulation.xlsx"
+
+testing:
+  # When true, every deck/class is run through all of `panel_configs`.
+  # When false, each deck uses its own min_regular / max_greed settings.
+  full_panel: true
+  panel_configs:
+    - { label: "no greed",      min_regular: -1, max_greed:  0 }
+    - { label: "min 14 reg",    min_regular: 14, max_greed: -1 }
+    - { label: "min 8 reg",     min_regular:  8, max_greed: -1 }
+    - { label: "unconstrained", min_regular: -1, max_greed: -1 }
+  n_iter:   60000
+  restarts: 12
+
+# Mode-specific overrides. Selected via the --mode CLI flag.
+modes:
+  wolds: {}   # baseline; nothing to override
+
+  vanilla:
+    # Vanilla preset: multiplicative core scaling, positional shiny off,
+    # deluxe card system disabled.
+    deckmod: 0
+    deluxe:
+      allow: false
+    stacking:
+      additive_cores: false
+    shiny:
+      positional: false

@@ -1,0 +1,14 @@
+name: Tenos Deck
+enabled: true
+
+core_slots: 3
+n_arcane:   2
+min_regular: -1
+max_greed:   -1
+
+layout: |
+  XXXXXX
+  .XXXX.
+  .XXXX.
+  .XXXX.
+  .XX.X.

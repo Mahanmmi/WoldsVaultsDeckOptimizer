@@ -1,0 +1,15 @@
+name: Puzzle Deck
+enabled: true
+
+core_slots: 2
+n_arcane:   0
+min_regular: -1
+max_greed:   -1
+
+layout: |
+  ...X..
+  .XXXXX
+  .XXXXX
+  XXXXX.
+  .XXXXX
+  .XX.XX

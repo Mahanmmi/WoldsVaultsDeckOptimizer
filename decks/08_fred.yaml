@@ -1,0 +1,15 @@
+name: Fred Deck
+enabled: true
+
+core_slots: 3
+n_arcane:   0
+min_regular: -1
+max_greed:   -1
+
+layout: |
+  XX....XX
+  .XX..XX.
+  ..XXXX..
+  ..XXXX..
+  ..XXXX..
+  .XX..XX.

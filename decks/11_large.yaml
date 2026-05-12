@@ -1,0 +1,12 @@
+name: Large Deck
+enabled: true
+
+core_slots: 1
+n_arcane:   0
+min_regular: -1
+max_greed:   -1
+
+layout: |
+  XXXXX
+  XX.XX
+  XXXXX
