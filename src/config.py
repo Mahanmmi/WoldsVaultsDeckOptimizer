@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
 
 import argparse as _argparse
+import json
+import re
 import yaml
 
 from .types import (
@@ -62,6 +64,8 @@ _deep_merge(_CFG, _mode_overrides)
 # ──────────────────────────────────────────────────────────────────────────────
 
 DECKMOD: int = _CFG["deckmod"]
+
+EXCLUDED_DECKS: FrozenSet[str] = frozenset(_CFG.get("excluded_decks") or ())
 
 MULT_DIR_GREED_VERT:      float = _CFG["greed"]["dir_vert"]
 MULT_DIR_GREED_HORIZ:     float = _CFG["greed"]["dir_horiz"]
@@ -243,37 +247,58 @@ def _get_test_configs(deck: Deck) -> List[Tuple[str, int, int]]:
 # ──────────────────────────────────────────────────────────────────────────────
 # Deck configurations
 # ──────────────────────────────────────────────────────────────────────────────
-# Decks are loaded from individual YAML files in the `decks/` directory next to
-# this script. Each file describes one deck (name, enabled flag, layout grid,
-# core slots, etc.). See `decks/01_cake.yaml` for an example. Set
-# `enabled: false` in a deck file to skip it without deleting it.
+# Decks are loaded from the `decks/` directory next to this script. Two formats
+# are supported (see `decks/README.md` for the full schema):
+#
+#   * ``*.yaml``  — one deck per file (hand-curated; supports `enabled`,
+#                   `min_regular`, `max_greed` overrides).
+#   * ``*.json``  — batch import in the Wold's Vaults game-data format
+#                   ({"values": {key: {name, layout, socketCount, …}}}).
+#
+# Layout grid characters (both formats):
+#     O → regular slot (placeable)
+#     A → arcane slot  (counted toward n_arcane; never placed on)
+#     X → empty / wall (any other character is also treated as empty)
 
-def _parse_layout(layout: str) -> Set[Tuple[int, int]]:
-    """Convert a visual layout grid into a set of (row, col) slot positions."""
+
+def _parse_layout(layout: str) -> Tuple[Set[Tuple[int, int]], int]:
+    """Convert a layout grid into ``(regular slot positions, arcane count)``.
+
+    Arcane slot positions are counted but not returned — the optimizer only
+    needs the total count for PURE-core scaling, not the geometry.
+    """
     slots: Set[Tuple[int, int]] = set()
+    n_arcane = 0
     for r, line in enumerate(layout.rstrip("\n").splitlines()):
         for c, ch in enumerate(line):
-            if ch in ("X", "x", "#"):
-                slots.add((r, c))
-    return slots
+            if   ch == "O": slots.add((r, c))
+            elif ch == "A": n_arcane += 1
+    return slots, n_arcane
 
 
-def _load_decks() -> List[Deck]:
-    if not _DECKS_DIR.is_dir():
-        raise FileNotFoundError(
-            f"Deck directory not found: {_DECKS_DIR}. "
-            "Add YAML deck files there or restore the directory."
-        )
+def _yaml_key(path: Path) -> str:
+    """Dedup key for a YAML deck file: stem with any leading ``NN_`` stripped.
 
+    e.g. ``01_cake.yaml`` → ``cake``; matches the JSON ``values.<key>`` field
+    so a YAML can override the same-keyed JSON entry.
+    """
+    return re.sub(r"^\d+_", "", path.stem)
+
+
+def _load_yaml_decks(seen_keys: Set[str]) -> List[Deck]:
     decks: List[Deck] = []
     for path in sorted(_DECKS_DIR.glob("*.yaml")):
+        key = _yaml_key(path)
+        if key in EXCLUDED_DECKS:
+            continue
+
         with path.open("r", encoding="utf-8") as fh:
             data = yaml.safe_load(fh) or {}
 
         if not data.get("enabled", True):
             continue
 
-        slots = _parse_layout(data["layout"])
+        slots, n_arcane = _parse_layout(data["layout"])
         if not slots:
             raise ValueError(
                 f"Deck file {path.name} has no slots — check the layout grid."
@@ -282,11 +307,67 @@ def _load_decks() -> List[Deck]:
         decks.append(Deck(
             slots       = slots,
             core_slots  = int(data["core_slots"]) + DECKMOD,
-            n_arcane    = int(data.get("n_arcane", 0)),
+            n_arcane    = n_arcane,
             min_regular = int(data.get("min_regular", -1)),
             max_greed   = int(data.get("max_greed", -1)),
             name        = str(data["name"]),
         ))
+        seen_keys.add(key)
+    return decks
+
+
+def _load_json_decks(seen_keys: Set[str]) -> List[Deck]:
+    """Batch import from Wold's Vaults game-data JSON files.
+
+    Schema: ``{"values": {<key>: {"name", "layout": [{"value": [<rows>]}],
+    "socketCount": {"max"}}}}``. Entries with a null ``socketCount`` (dungeon-
+    only variants) are skipped. JSON entries whose ``<key>`` matches a YAML
+    filename (stripped of any ``NN_`` prefix) are skipped — the YAML wins.
+    """
+    decks: List[Deck] = []
+    for path in sorted(_DECKS_DIR.glob("*.json")):
+        with path.open("r", encoding="utf-8") as fh:
+            data = json.load(fh) or {}
+
+        for key, entry in (data.get("values") or {}).items():
+            if key in EXCLUDED_DECKS:
+                continue
+            if key in seen_keys:                  # YAML override
+                continue
+            sockets     = entry.get("socketCount") or {}
+            max_sockets = sockets.get("max")
+            if max_sockets is None:               # dungeon-only variant
+                continue
+            layouts = entry.get("layout") or []
+            if not layouts:
+                continue
+            layout_str = "\n".join(layouts[0]["value"])
+            slots, n_arcane = _parse_layout(layout_str)
+            if not slots:
+                continue
+            decks.append(Deck(
+                slots       = slots,
+                core_slots  = int(max_sockets) + DECKMOD,
+                n_arcane    = n_arcane,
+                min_regular = -1,
+                max_greed   = -1,
+                name        = str(entry.get("name") or key),
+            ))
+            seen_keys.add(key)
+    return decks
+
+
+def _load_decks() -> List[Deck]:
+    if not _DECKS_DIR.is_dir():
+        raise FileNotFoundError(
+            f"Deck directory not found: {_DECKS_DIR}. "
+            "Add YAML/JSON deck files there or restore the directory."
+        )
+
+    seen_keys: Set[str] = set()
+    decks: List[Deck] = []
+    decks.extend(_load_yaml_decks(seen_keys))
+    decks.extend(_load_json_decks(seen_keys))
 
     if not decks:
         raise RuntimeError(

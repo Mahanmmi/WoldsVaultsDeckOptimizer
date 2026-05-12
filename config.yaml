@@ -10,6 +10,13 @@
 # balance core, reduce deckmod so every deck must reserve a slot for that core.
 deckmod: 1
 
+# Deck keys to skip at load time. A "key" is the YAML filename stem (with any
+# leading `NN_` prefix stripped) or the JSON `values.<key>` property. Useful
+# for excluding decks you don't want to optimize without deleting their files.
+# Example: ["arcane", "wold"] would skip both `decks/<n>_arcane.yaml` and
+# `values.arcane`, plus `<n>_wold.yaml` and `values.wold`.
+excluded_decks: []
+
 greed:
   dir_vert:      5
   dir_horiz:     5
