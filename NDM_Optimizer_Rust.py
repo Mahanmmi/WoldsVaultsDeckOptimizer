@@ -1638,6 +1638,7 @@ if __name__ == "__main__":
     restarts = 12
     n_cores  = min(len(DECKS), multiprocessing.cpu_count())
 
+    print(f"[ndm] Mode: {MODE}")
     print(f"Running {len(DECKS)} deck(s) across {n_cores} process(es)...")
 
     args = [(deck, n_iter, restarts) for deck in DECKS]

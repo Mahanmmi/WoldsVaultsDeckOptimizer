@@ -59,7 +59,7 @@ uv run optimize-py
 Or with the Vanilla preset:
 
 ```
-uv run optimize-py -- --mode vanilla
+uv run optimize-py --mode vanilla
 ```
 
 #### With Rust (much faster, requires the Rust toolchain)
@@ -81,7 +81,7 @@ uv run --extra rust optimize
 Or with the Vanilla preset:
 
 ```
-uv run --extra rust optimize -- --mode vanilla
+uv run --extra rust optimize --mode vanilla
 ```
 
 The first run with `--extra rust` will compile `ndm_core` (takes a minute or two); subsequent runs are instant. Re-running without `--extra rust` afterwards is fine — `uv` keeps the Rust core in your environment.
@@ -91,12 +91,12 @@ The first run with `--extra rust` will compile `ndm_core` (takes a minute or two
 | What you want                                      | Command                                       | Needs Rust? |
 |----------------------------------------------------|-----------------------------------------------|-------------|
 | Pure Python, Wold's mode (default)                 | `uv run optimize-py`                          | No          |
-| Pure Python, Vanilla mode                          | `uv run optimize-py -- --mode vanilla`        | No          |
+| Pure Python, Vanilla mode                          | `uv run optimize-py --mode vanilla`           | No          |
 | Rust-accelerated, Wold's mode                      | `uv run --extra rust optimize`                | Yes         |
-| Rust-accelerated, Vanilla mode                     | `uv run --extra rust optimize -- --mode vanilla` | Yes      |
-| Show CLI help for the optimizer                    | `uv run optimize-py -- --help`                | No          |
+| Rust-accelerated, Vanilla mode                     | `uv run --extra rust optimize --mode vanilla` | Yes         |
+| Show CLI help for the optimizer                    | `uv run optimize-py --help`                   | No          |
 
-The `--` separator tells `uv` that the rest of the flags belong to the optimizer, not to `uv` itself.
+Anything after the command name is passed straight through to the optimizer, so no `--` separator is needed.
 
 The optimizer writes its output spreadsheet (`Panel_WV_Decks_ndm_simulation.xlsx` by default) into the current working directory.
 
