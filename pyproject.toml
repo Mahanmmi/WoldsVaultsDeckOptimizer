@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
     "openpyxl>=3.1",
+    "pyyaml>=6.0",
 ]
 
 # Opt-in Rust core. Enable it with `uv run --extra rust optimize`.
@@ -23,7 +24,7 @@ optimize = "optimizer:main"
 optimize-py = "optimizer:main_no_rust"
 
 [tool.hatch.build.targets.wheel]
-only-include = ["optimizer.py"]
+only-include = ["optimizer.py", "src"]
 
 [tool.uv.sources]
 ndm_core = { path = "ndm_core", editable = false }
@@ -33,6 +34,7 @@ ndm_core = { path = "ndm_core", editable = false }
 cache-keys = [
     { file = "pyproject.toml" },
     { file = "optimizer.py" },
+    { file = "src/**/*.py" },
     { file = "ndm_core/Cargo.toml" },
     { file = "ndm_core/Cargo.lock" },
     { file = "ndm_core/src/**/*.rs" },
