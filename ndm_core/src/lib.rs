@@ -235,6 +235,9 @@ fn simulate(deck: &DeckData, asgn: &[u8], cores: &[u8], cfg: &SimConfig) -> f64 
     };
 
     // ── Core multipliers ──────────────────────────────────────────────────────
+    // init = 1.0 for both additive and multiplicative modes.
+    // Additive:       boost[j] += (amount - 1.0)
+    // Multiplicative: boost[j] *= amount
     let mut core_c: Vec<f64>        = Vec::with_capacity(4);
     let mut deluxe_c: Vec<f64>      = Vec::with_capacity(2);
 
