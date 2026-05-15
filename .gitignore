@@ -16,3 +16,11 @@ __pycache__/
 
 # Python virtual environment
 .venv/
+
+# Claude Code worktrees + per-project metadata (they live inside the repo)
+.claude/
+
+# Scratch / smoke-test artifacts (local-only)
+scratch_*.py
+scratch_*.log
+scratch_*.txt

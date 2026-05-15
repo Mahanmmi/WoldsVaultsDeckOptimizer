@@ -38,6 +38,22 @@ class CardType(Enum):
     SURR_GREED      = "surr_greed"
     FILLER_GREED    = "filler_greed"
     EMPTY           = "empty"
+    # Inventory optimizer only: transparent slot-filler when inventory is exhausted.
+    # Contributes nothing to NDM and does not participate in any same-color count.
+    DEAD            = "dead"
+
+
+class Color(Enum):
+    """Card color, used only by the inventory-based optimizer.
+
+    Positional bonuses count only same-color cards in scan range; the COLOR
+    core only boosts matching-color cards. The classic optimizer is color-blind
+    and never uses this enum.
+    """
+    RED    = "red"
+    GREEN  = "green"
+    BLUE   = "blue"
+    YELLOW = "yellow"
 
 
 GREED_TYPES    = frozenset({

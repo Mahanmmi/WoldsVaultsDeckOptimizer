@@ -97,29 +97,36 @@ def simulate(
         n_ns = len(greed)
     n_deluxe = len(deluxe)
 
-    core_contributions        = []
-    deluxe_core_contributions = []
+    # All cores fold into a single core_mult. DELUXE_CORE is gated per-card:
+    # it applies to regular / typeless cards but never to deluxe cards. So we
+    # compute a baseline (everything except deluxe core) and an addend / factor
+    # for the deluxe core, then build two core_mult variants below.
+    baseline_contribs = []
+    deluxe_core_value = None  # raw multiplier value for DELUXE_CORE if present
     for core in cores:
         if   core == CoreType.PURE:
-            core_contributions.append(MULT_PURE_BASE + MULT_PURE_SCALE * (n_ns + deck.n_arcane))
+            baseline_contribs.append(MULT_PURE_BASE + MULT_PURE_SCALE * (n_ns + deck.n_arcane))
         elif core == CoreType.EQUILIBRIUM and card_class == CardClass.SHINY:
-            core_contributions.append(MULT_EQUILIBRIUM)
+            baseline_contribs.append(MULT_EQUILIBRIUM)
         elif core == CoreType.STEADFAST   and card_class == CardClass.SHINY:
-            core_contributions.append(MULT_STEADFAST)
+            baseline_contribs.append(MULT_STEADFAST)
         elif core == CoreType.COLOR:
-            core_contributions.append(MULT_COLOR)
+            baseline_contribs.append(MULT_COLOR)
         elif core == CoreType.FOIL:
-            core_contributions.append(MULT_FOIL)
+            baseline_contribs.append(MULT_FOIL)
         elif core == CoreType.DELUXE_CORE:
-            deluxe_core_contributions.append(
-                MULT_DELUXE_CORE_BASE + MULT_DELUXE_CORE_SCALE * n_deluxe)
+            deluxe_core_value = MULT_DELUXE_CORE_BASE + MULT_DELUXE_CORE_SCALE * n_deluxe
 
     if ADDITIVE_CORES:
-        core_mult        = 1.0 + sum(v - 1.0 for v in core_contributions)        if core_contributions        else 1.0
-        deluxe_core_mult = 1.0 + sum(v - 1.0 for v in deluxe_core_contributions) if deluxe_core_contributions else 1.0
+        baseline_sum  = sum(v - 1.0 for v in baseline_contribs)
+        deluxe_addend = (deluxe_core_value - 1.0) if deluxe_core_value is not None else 0.0
+        non_deluxe_core_mult = 1.0 + baseline_sum + deluxe_addend
+        deluxe_card_core_mult = 1.0 + baseline_sum
     else:
-        core_mult        = math.prod(core_contributions)        if core_contributions        else 1.0
-        deluxe_core_mult = math.prod(deluxe_core_contributions) if deluxe_core_contributions else 1.0
+        baseline_prod = math.prod(baseline_contribs) if baseline_contribs else 1.0
+        deluxe_factor = deluxe_core_value if deluxe_core_value is not None else 1.0
+        non_deluxe_core_mult = baseline_prod * deluxe_factor
+        deluxe_card_core_mult = baseline_prod
 
     row_count: Dict[int, int] = {}
     col_count: Dict[int, int] = {}
@@ -176,15 +183,15 @@ def simulate(
         elif t == CardType.DIAG: pos = sum(1 for q in deck._diag_peers[p] if q in filled) + 1
         else:                    pos = sum(1 for q in deck._surr_peers[p] if q in filled)
         b    = max(boost[p], 1.0) if GREED_ADDITIVE else boost[p]
-        ndm += _contrib(pos * core_mult * deluxe_core_mult * b)
+        ndm += _contrib(pos * non_deluxe_core_mult * b)
 
     for p in deluxe:
         b    = max(boost[p], 1.0) if GREED_ADDITIVE else boost[p]
-        ndm += _contrib(MULT_DELUXE_FLAT * core_mult * b)
+        ndm += _contrib(MULT_DELUXE_FLAT * deluxe_card_core_mult * b)
 
     for p in typeless:
         b    = max(boost[p], 1.0) if GREED_ADDITIVE else boost[p]
-        ndm += _contrib(1.0 * core_mult * deluxe_core_mult * b)
+        ndm += _contrib(1.0 * non_deluxe_core_mult * b)
 
     return ndm
 

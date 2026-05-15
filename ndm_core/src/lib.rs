@@ -3,6 +3,8 @@ use rand::prelude::*;
 use rand::rngs::SmallRng;
 use std::collections::HashMap;
 
+mod inventory;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Card type constants (u8)
 // Must match the CardType enum values in the Python code.
@@ -235,42 +237,45 @@ fn simulate(deck: &DeckData, asgn: &[u8], cores: &[u8], cfg: &SimConfig) -> f64 
     };
 
     // ── Core multipliers ──────────────────────────────────────────────────────
-    // init = 1.0 for both additive and multiplicative modes.
-    // Additive:       boost[j] += (amount - 1.0)
-    // Multiplicative: boost[j] *= amount
-    let mut core_c: Vec<f64>        = Vec::with_capacity(4);
-    let mut deluxe_c: Vec<f64>      = Vec::with_capacity(2);
+    // All cores fold into a single core_mult. DELUXE_CORE is gated per-card:
+    // it applies to regulars and typeless cards but NOT to deluxes. So we
+    // compute a baseline (everything except deluxe core) and an addend / factor
+    // for the deluxe core, then build the two card-class core_mult variants.
+    let mut baseline_c: Vec<f64> = Vec::with_capacity(5);
+    let mut deluxe_core_value: Option<f64> = None;
 
     for &core in cores {
         match core {
             CORE_PURE => {
-                core_c.push(cfg.mult_pure_base + cfg.mult_pure_scale * (n_ns + deck.n_arcane) as f64);
+                baseline_c.push(cfg.mult_pure_base + cfg.mult_pure_scale * (n_ns + deck.n_arcane) as f64);
             }
-            CORE_EQUILIBRIUM if cfg.is_shiny => { core_c.push(cfg.mult_equilibrium); }
-            CORE_STEADFAST   if cfg.is_shiny => { core_c.push(cfg.mult_steadfast); }
-            CORE_COLOR   => { core_c.push(cfg.mult_color); }
-            CORE_FOIL    => { core_c.push(cfg.mult_foil); }
-            CORE_DELUXE  => {
-                deluxe_c.push(cfg.mult_deluxe_core_base + cfg.mult_deluxe_core_scale * n_deluxe as f64);
+            CORE_EQUILIBRIUM if cfg.is_shiny => { baseline_c.push(cfg.mult_equilibrium); }
+            CORE_STEADFAST   if cfg.is_shiny => { baseline_c.push(cfg.mult_steadfast); }
+            CORE_COLOR  => { baseline_c.push(cfg.mult_color); }
+            CORE_FOIL   => { baseline_c.push(cfg.mult_foil); }
+            CORE_DELUXE => {
+                deluxe_core_value = Some(
+                    cfg.mult_deluxe_core_base + cfg.mult_deluxe_core_scale * n_deluxe as f64,
+                );
             }
             _ => {}
         }
     }
 
-    let core_mult = if cfg.additive_cores {
-        if core_c.is_empty() { 1.0 }
-        else { 1.0 + core_c.iter().map(|v| v - 1.0).sum::<f64>() }
+    let (non_deluxe_core_mult, deluxe_card_core_mult) = if cfg.additive_cores {
+        let baseline_sum: f64 = baseline_c.iter().map(|v| v - 1.0).sum();
+        let deluxe_addend: f64 = deluxe_core_value.map_or(0.0, |v| v - 1.0);
+        (
+            1.0 + baseline_sum + deluxe_addend, // non-deluxe (regular + typeless)
+            1.0 + baseline_sum,                  // deluxe cards
+        )
     } else {
-        if core_c.is_empty() { 1.0 }
-        else { core_c.iter().product() }
-    };
-
-    let deluxe_core_mult = if cfg.additive_cores {
-        if deluxe_c.is_empty() { 1.0 }
-        else { 1.0 + deluxe_c.iter().map(|v| v - 1.0).sum::<f64>() }
-    } else {
-        if deluxe_c.is_empty() { 1.0 }
-        else { deluxe_c.iter().product() }
+        let baseline_prod: f64 = if baseline_c.is_empty() { 1.0 } else { baseline_c.iter().product() };
+        let deluxe_factor: f64 = deluxe_core_value.unwrap_or(1.0);
+        (
+            baseline_prod * deluxe_factor,
+            baseline_prod,
+        )
     };
 
     // ── Row / col counts for positional multipliers ───────────────────────────
@@ -381,13 +386,13 @@ fn simulate(deck: &DeckData, asgn: &[u8], cores: &[u8], cfg: &SimConfig) -> f64 
                 _    => 0,
             };
             let b = if cfg.greed_additive { boost[i].max(1.0) } else { boost[i] };
-            ndm += contrib(pos as f64 * core_mult * deluxe_core_mult * b);
+            ndm += contrib(pos as f64 * non_deluxe_core_mult * b);
         } else if is_deluxe[i] {
             let b = if cfg.greed_additive { boost[i].max(1.0) } else { boost[i] };
-            ndm += contrib(cfg.mult_deluxe_flat * core_mult * b);
+            ndm += contrib(cfg.mult_deluxe_flat * deluxe_card_core_mult * b);
         } else if is_typeless[i] {
             let b = if cfg.greed_additive { boost[i].max(1.0) } else { boost[i] };
-            ndm += contrib(1.0_f64 * core_mult * deluxe_core_mult * b);
+            ndm += contrib(1.0_f64 * non_deluxe_core_mult * b);
         }
     }
 
@@ -713,5 +718,6 @@ fn run_sa_optimize(
 #[pymodule]
 fn ndm_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(run_sa_optimize, m)?)?;
+    m.add_function(wrap_pyfunction!(inventory::run_sa_inventory, m)?)?;
     Ok(())
 }

@@ -377,3 +377,92 @@ def _load_decks() -> List[Deck]:
 
 
 DECKS: List[Deck] = _load_decks()
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Runtime mode switching (GUI only)
+# ──────────────────────────────────────────────────────────────────────────────
+#
+# The CLI sets MODE once at import. The GUI lets the user flip between wolds
+# and vanilla without restarting; ``set_mode`` re-reads ``config.yaml``,
+# re-applies the merge, and rebinds every UPPERCASE module constant so the
+# inventory optimizer sees the new values. The legacy batch optimizer is not
+# affected — it reads constants once at module load.
+#
+# IMPORTANT: callers that import these names directly (``from .config import
+# ADDITIVE_CORES``) get a stale value until reimported. Reference them through
+# the module (``config.ADDITIVE_CORES``) for live updates.
+
+def set_mode(name: str) -> None:
+    """Re-load ``config.yaml`` with the given mode's overrides and rebind
+    every mode-dependent module constant in place.
+
+    Also reloads ``DECKS`` because ``deckmod`` (different across modes) affects
+    each deck's ``core_slots`` at load time.
+    """
+    if name not in ("wolds", "vanilla"):
+        raise ValueError(f"unknown mode: {name!r}")
+
+    global MODE, _CFG
+    global DECKMOD, EXCLUDED_DECKS
+    global MULT_DIR_GREED_VERT, MULT_DIR_GREED_HORIZ, MULT_EVO_GREED, MULT_SURR_GREED
+    global MULT_DIR_GREED_DIAG_UP, MULT_DIR_GREED_DIAG_DOWN
+    global MULT_PURE_BASE, MULT_PURE_SCALE, MULT_EQUILIBRIUM, MULT_FOIL, MULT_STEADFAST, MULT_COLOR
+    global ALLOW_DELUXE, MULT_DELUXE_FLAT, MULT_DELUXE_CORE_BASE, MULT_DELUXE_CORE_SCALE
+    global GREED_ADDITIVE, ADDITIVE_CORES, SHINY_POSITIONAL
+    global ENABLE_EXPERIMENTAL_EXPONENT, EXPERIMENTAL_EXPONENT, EXPERIMENTAL_BOOST
+    global DELUXE_COUNTED_AS_REGULAR
+    global BALANCE_DISPLAY, HEATMAP_DISPLAY, HNS_Q, SPREAD_METRIC
+    global EXPORT_SPREADSHEET, SPREADSHEET_PREFIX, FULL_TEST_PANEL
+    global DECKS
+
+    # Re-read + re-merge
+    with _CONFIG_PATH.open("r", encoding="utf-8") as _f:
+        new_cfg = yaml.safe_load(_f)
+    _deep_merge(new_cfg, (new_cfg.get("modes") or {}).get(name, {}) or {})
+    _CFG = new_cfg
+    MODE = name
+
+    DECKMOD                  = _CFG["deckmod"]
+    EXCLUDED_DECKS           = frozenset(_CFG.get("excluded_decks") or ())
+    MULT_DIR_GREED_VERT      = _CFG["greed"]["dir_vert"]
+    MULT_DIR_GREED_HORIZ     = _CFG["greed"]["dir_horiz"]
+    MULT_EVO_GREED           = _CFG["greed"]["evo"]
+    MULT_SURR_GREED          = _CFG["greed"]["surr"]
+    MULT_DIR_GREED_DIAG_UP   = _CFG["greed"]["dir_diag_up"]
+    MULT_DIR_GREED_DIAG_DOWN = _CFG["greed"]["dir_diag_down"]
+    MULT_PURE_BASE           = _CFG["cores"]["pure_base"]
+    MULT_PURE_SCALE          = _CFG["cores"]["pure_scale"]
+    MULT_EQUILIBRIUM         = _CFG["cores"]["equilibrium"]
+    MULT_FOIL                = _CFG["cores"]["foil"]
+    MULT_STEADFAST           = _CFG["cores"]["steadfast"]
+    MULT_COLOR               = _CFG["cores"]["color"]
+    ALLOW_DELUXE             = _CFG["deluxe"]["allow"]
+    MULT_DELUXE_FLAT         = _CFG["deluxe"]["flat"]
+    MULT_DELUXE_CORE_BASE    = _CFG["deluxe"]["core_base"]
+    MULT_DELUXE_CORE_SCALE   = _CFG["deluxe"]["core_scale"]
+    GREED_ADDITIVE           = _CFG["stacking"]["greed_additive"]
+    ADDITIVE_CORES           = _CFG["stacking"]["additive_cores"]
+    SHINY_POSITIONAL         = _CFG["shiny"]["positional"]
+    ENABLE_EXPERIMENTAL_EXPONENT = _CFG["experimental"]["enable_exponent"]
+    EXPERIMENTAL_EXPONENT    = _CFG["experimental"]["exponent"]
+    EXPERIMENTAL_BOOST       = _CFG["experimental"]["boost"]
+    DELUXE_COUNTED_AS_REGULAR = _CFG["constraints"]["deluxe_counted_as_regular"]
+    BALANCE_DISPLAY          = _CFG["display"]["balance"]
+    HEATMAP_DISPLAY          = _CFG["display"]["heatmap"]
+    HNS_Q                    = _CFG["metrics"]["hns_q"]
+    SPREAD_METRIC            = _CFG["metrics"]["spread"]
+    EXPORT_SPREADSHEET       = _CFG["output"]["export_spreadsheet"]
+    SPREADSHEET_PREFIX       = _CFG["output"]["spreadsheet_prefix"]
+    FULL_TEST_PANEL          = _CFG["testing"]["full_panel"]
+
+    # PLACEABLE is module-level state in types.py and was mutated at import time
+    # based on ALLOW_DELUXE. Re-sync it now so it matches the new mode.
+    from .types import PLACEABLE, CardType as _CT
+    while _CT.DELUXE in PLACEABLE:
+        PLACEABLE.remove(_CT.DELUXE)
+    if ALLOW_DELUXE:
+        PLACEABLE.append(_CT.DELUXE)
+
+    # Reload decks — DECKMOD affects each Deck's core_slots at load.
+    DECKS = _load_decks()
