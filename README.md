@@ -94,6 +94,7 @@ The first run with `--extra rust` will compile `ndm_core` (takes a minute or two
 | Pure Python, Vanilla mode                          | `uv run optimize-py --mode vanilla`           | No          |
 | Rust-accelerated, Wold's mode                      | `uv run --extra rust optimize`                | Yes         |
 | Rust-accelerated, Vanilla mode                     | `uv run --extra rust optimize --mode vanilla` | Yes         |
+| Interactive GUI (inventory optimizer, single deck) | `uv run --extra rust optimize-gui`            | Recommended |
 | Show CLI help for the optimizer                    | `uv run optimize-py --help`                   | No          |
 
 Anything after the command name is passed straight through to the optimizer, so no `--` separator is needed.
@@ -114,3 +115,9 @@ The script's tunable constants live near the top of `NDM_Optimizer_Rust.py`. Aft
 |-----------|--------------------------|-------------------------------------------------------------------------------------------------------|
 | `wolds`   | Default. Wold's Vaults.  | Additive core stacking, positional shiny enabled, deluxe card system enabled.                         |
 | `vanilla` | Vanilla VH cards.        | Multiplicative core scaling, positional shiny disabled (Shiny becomes a pure stat deck), no deluxe.   |
+
+---
+
+## Interactive GUI
+
+`uv run --extra rust optimize-gui` launches a local web app (opens automatically in your browser) for optimizing a single deck against a concrete card inventory you specify — type, color, and count per stack — rather than the unlimited-inventory model the spreadsheet pipeline uses. Pick a deck, toggle cores and overrides, fill in (or click *Unlimited 100×*) the inventory table, hit Run; the deck repaints with the optimizer's chosen placement and per-slot NDM. Click any tile for the full math breakdown. The Wolds/Vanilla toggle inside the app switches modes live. Rust is recommended — the pure-Python fallback works but is much slower per iteration.
