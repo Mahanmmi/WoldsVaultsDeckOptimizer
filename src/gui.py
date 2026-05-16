@@ -18,7 +18,9 @@ from typing import Dict, List, Optional, Set, Tuple
 from nicegui import app, run, ui
 
 from . import config as _cfg  # read DECKS / MODE via attribute for live updates
+from . import preview as _preview
 from .config import Deck
+from .modifiers import get_card
 from .types import CardClass, CardType, Color, CoreType
 from .inventory_optimize import (
     CardInventory,
@@ -121,6 +123,11 @@ class _AppState:
     last_result: Optional[InventoryResult] = None
     n_iter: int = 60_000
     restarts: int = 12
+    # Top-level view: "optimize" (default UI) or "preview" (assign stat cards
+    # to the last optimized layout and see player-facing stat totals).
+    view: str = "optimize"
+    # Slot -> (modifier_key, tier). Survives Run when slot family is unchanged.
+    preview_assignments: Dict[Tuple[int, int], Tuple[str, int]] = field(default_factory=dict)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -131,7 +138,19 @@ _SLOT_PX = 64
 _GAP_PX  = 6
 
 
-def _render_deck_grid(container: ui.element, state: _AppState) -> None:
+def _render_deck_grid(
+    container: ui.element,
+    state: _AppState,
+    *,
+    on_preview_change: Optional[callable] = None,
+) -> None:
+    """Re-render the deck grid for the current state.view.
+
+    Optimize view  → slot click opens the math-breakdown dialog (when result).
+    Preview view   → slot click opens the card-assign dialog (when assignable);
+                     ``on_preview_change`` is invoked after a successful assign
+                     so the caller can refresh the stats panel + the grid.
+    """
     container.clear()
     deck = state.deck
     result = state.last_result
@@ -162,10 +181,16 @@ def _render_deck_grid(container: ui.element, state: _AppState) -> None:
                             f"width:{_SLOT_PX}px;height:{_SLOT_PX}px;background:transparent;"
                         )
                         continue
-                    _render_slot(pos, deck, result)
+                    _render_slot(pos, state, on_preview_change=on_preview_change)
 
 
-def _render_slot(pos: Tuple[int, int], deck: Deck, result: Optional[InventoryResult]) -> None:
+def _render_slot(
+    pos: Tuple[int, int],
+    state: _AppState,
+    *,
+    on_preview_change: Optional[callable] = None,
+) -> None:
+    result = state.last_result
     if result is not None and pos in result.assignment:
         t, color = result.assignment[pos]
     else:
@@ -180,15 +205,37 @@ def _render_slot(pos: Tuple[int, int], deck: Deck, result: Optional[InventoryRes
         else None
     )
 
+    # Preview state for this slot
+    in_preview = (state.view == "preview")
+    preview_assignable = (
+        in_preview and t != CardType.EMPTY
+        and _preview.is_assignable_slot(t, state.card_class)
+    )
+    preview_assignment = state.preview_assignments.get(pos) if in_preview else None
+    preview_card = get_card(preview_assignment[0]) if preview_assignment else None
+
+    # Cursor + opacity
+    if in_preview:
+        if preview_assignable:
+            cursor = "pointer"
+            opacity = 1.0
+        else:
+            cursor = "not-allowed"
+            opacity = 0.55  # gray out non-assignable slots in preview
+    else:
+        cursor = "help" if breakdown is not None else "default"
+        opacity = 1.0
+
     with ui.element("div").style(
         f"width:{_SLOT_PX}px;height:{_SLOT_PX}px;"
         f"background:{bg};"
         f"border: 1px solid rgba(0,0,0,.08);"
         f"border-radius: 8px;"
         f"position:relative;"
+        f"opacity:{opacity};"
         f"display:flex;flex-direction:column;align-items:center;justify-content:center;"
         f"font-family:'JetBrains Mono','Consolas',monospace;"
-        f"cursor:{'help' if breakdown is not None else 'default'};"
+        f"cursor:{cursor};"
     ) as slot_div:
         ui.label(glyph).style("font-size:22px; font-weight:600; line-height:1;")
         if ndm is not None and ndm > 0:
@@ -200,23 +247,53 @@ def _render_slot(pos: Tuple[int, int], deck: Deck, result: Optional[InventoryRes
                 f"background:{_GAME_COLOR_HEX[color]};"
                 f"border:1px solid rgba(0,0,0,.2);"
             )
-        if breakdown is not None:
-            # Click-to-open dialog (NOT a hover tooltip) because Quasar tooltips
-            # dismiss on mouse-leave and can't be scrolled. The dialog stays open
-            # until the user clicks outside or hits Esc.
-            with ui.dialog() as bd_dialog:
-                with ui.card().style(
-                    "background:#1F2937;color:#F9FAFB;"
-                    "padding:14px 18px;border-radius:10px;"
-                    "min-width:360px;max-width:560px;"
-                    "max-height:80vh;overflow-y:auto;"
-                    "font-family:'JetBrains Mono','Consolas',monospace;"
-                    "font-size:12px;line-height:1.5;white-space:pre-wrap;"
-                ):
-                    ui.label(_format_breakdown(pos, breakdown))
-                    ui.button("Close", on_click=bd_dialog.close) \
-                        .props("flat dense color=white").classes("mt-2")
-            slot_div.on("click", lambda _e=None, d=bd_dialog: d.open())
+
+        # Preview assignment badge (tier + attribute abbreviation)
+        if preview_card is not None and preview_assignment is not None:
+            tier = preview_assignment[1]
+            ui.label(f"T{tier}").style(
+                "position:absolute;top:3px;left:4px;"
+                "font-size:9px;font-weight:700;color:#1F2937;"
+                "background:#FDE68A;border-radius:3px;padding:0 3px;line-height:13px;"
+            )
+            ui.label(_preview.attr_abbrev(preview_card.attribute_short)).style(
+                "position:absolute;bottom:3px;left:0;right:0;text-align:center;"
+                "font-size:9px;font-weight:600;color:#1F2937;"
+            )
+
+        # Click behavior depends on view
+        if in_preview:
+            if preview_assignable and result is not None:
+                slot_ndm = ndm or 0.0
+                slot_class = state.card_class
+                slot_type_t = t
+                slot_div.on(
+                    "click",
+                    lambda _e=None, p=pos, st=slot_type_t, cls=slot_class,
+                            n=slot_ndm: _preview.open_assign_dialog(
+                        p, st, cls, n, state,
+                        on_done=(on_preview_change or (lambda: None)),
+                    ),
+                )
+            # non-assignable preview slots: no click handler (cursor: not-allowed)
+        else:
+            # Optimize view: open breakdown dialog if available
+            if breakdown is not None:
+                # Click-to-open dialog (NOT a hover tooltip) because Quasar tooltips
+                # dismiss on mouse-leave and can't be scrolled.
+                with ui.dialog() as bd_dialog:
+                    with ui.card().style(
+                        "background:#1F2937;color:#F9FAFB;"
+                        "padding:14px 18px;border-radius:10px;"
+                        "min-width:360px;max-width:560px;"
+                        "max-height:80vh;overflow-y:auto;"
+                        "font-family:'JetBrains Mono','Consolas',monospace;"
+                        "font-size:12px;line-height:1.5;white-space:pre-wrap;"
+                    ):
+                        ui.label(_format_breakdown(pos, breakdown))
+                        ui.button("Close", on_click=bd_dialog.close) \
+                            .props("flat dense color=white").classes("mt-2")
+                slot_div.on("click", lambda _e=None, d=bd_dialog: d.open())
 
 
 def _build_legend() -> None:
@@ -381,6 +458,15 @@ def _build_page() -> None:
         </style>
     """)
 
+    # Forward closure: rebinds at call time. ``grid_container`` and
+    # ``preview_panel`` are defined later in this function but the closure
+    # captures the names lazily, so this is safe as long as we don't *call*
+    # the function before those names exist.
+    def _on_preview_change() -> None:
+        _render_deck_grid(grid_container, state, on_preview_change=_on_preview_change)
+        if state.view == "preview":
+            _preview.build_stats_panel(preview_panel, state)
+
     with ui.row().classes("w-full items-start gap-6 p-6 no-wrap"):
         # ── Left: results + grid ─────────────────────────────────────────────
         with ui.column().classes("gap-3 items-center"):
@@ -389,130 +475,183 @@ def _build_page() -> None:
             cores_label = ui.label("").classes("text-sm text-gray-500")
             verify_label = ui.label("").style("font-size:12px;")
             grid_container = ui.element("div")
-            _render_deck_grid(grid_container, state)
+            _render_deck_grid(grid_container, state, on_preview_change=_on_preview_change)
             _build_legend()
 
         # ── Right: controls ──────────────────────────────────────────────────
         with ui.column().classes("gap-3").style("min-width: 480px;"):
-            # Deck & class
+            # ── View toggle (always visible) ─────────────────────────────────
             with ui.card().tight().classes("w-full"):
                 with ui.card_section():
-                    ui.label("Deck & class").classes("text-sm font-semibold uppercase text-gray-500")
                     with ui.row().classes("w-full items-center gap-3"):
-                        def _on_deck_change(e):
-                            for d in _cfg.DECKS:
-                                if d.name == e.value:
-                                    state.deck = d
-                                    state.last_result = None
-                                    total_label.text = "NDM  —"
-                                    cores_label.text = ""
-                                    verify_label.text = ""
-                                    _render_deck_grid(grid_container, state)
-                                    return
-                        ui.select(
-                            options=[d.name for d in _cfg.DECKS],
-                            value=state.deck.name,
-                            label="Deck",
-                            on_change=_on_deck_change,
-                        ).classes("flex-grow")
-                        ui.select(
-                            options={CardClass.SHINY.value: "Shiny", CardClass.EVO.value: "Evo"},
-                            value=state.card_class.value,
-                            label="Class",
-                            on_change=lambda e: setattr(state, "card_class", CardClass(e.value)),
-                        ).classes("w-28")
-                    # Mode toggle (Wolds / Vanilla). Switching modes calls
-                    # config.set_mode() which re-merges config.yaml and reloads
-                    # DECKS, so a deck's core_slots reflects the new mode's
-                    # deckmod immediately.
-                    def _on_mode_change(e):
-                        try:
-                            _cfg.set_mode(e.value)
-                        except Exception as exc:  # noqa: BLE001
-                            ui.notify(f"Mode change failed: {exc}", color="negative")
-                            return
-                        state.mode = e.value
-                        state.last_result = None
-                        # Re-fetch our currently-selected deck from the new DECKS list
-                        # (each Deck's core_slots may have shifted due to deckmod change).
-                        prev_name = state.deck.name
-                        match = next((d for d in _cfg.DECKS if d.name == prev_name), None)
-                        if match is not None:
-                            state.deck = match
-                        else:
-                            state.deck = _cfg.DECKS[0]
-                            ui.notify(
-                                f"Deck '{prev_name}' not available in {e.value} mode — "
-                                f"switched to '{state.deck.name}'.",
-                                color="warning",
+                        ui.label("View").classes("text-sm font-semibold uppercase text-gray-500")
+                        def _on_view_change(e):
+                            state.view = e.value
+                            optimize_panel.set_visibility(state.view == "optimize")
+                            preview_panel.set_visibility(state.view == "preview")
+                            if state.view == "preview":
+                                _preview.build_stats_panel(preview_panel, state)
+                            # Re-render grid so click handlers match the new view.
+                            _render_deck_grid(
+                                grid_container, state,
+                                on_preview_change=_on_preview_change,
                             )
-                        total_label.text = "NDM  —"
-                        cores_label.text = ""
-                        verify_label.text = ""
-                        _render_deck_grid(grid_container, state)
-                        ui.notify(f"Optimizer mode: {e.value}", color="positive")
-                    with ui.row().classes("w-full items-center gap-3 mt-2"):
-                        ui.label("Mode").classes("text-xs text-gray-500")
                         ui.toggle(
-                            {"wolds": "Wolds", "vanilla": "Vanilla"},
-                            value=state.mode,
-                            on_change=_on_mode_change,
+                            {"optimize": "Optimize", "preview": "Preview"},
+                            value=state.view,
+                            on_change=_on_view_change,
                         ).props("dense")
+                    ui.label(
+                        "Optimize finds the best layout; Preview lets you assign "
+                        "stat cards to the layout and see the totals."
+                    ).classes("text-xs text-gray-500 mt-1")
 
-            # Cores
-            core_rows: List[Tuple["ui.checkbox", "ui.number", "callable"]] = []
-            with ui.card().tight().classes("w-full"):
-                with ui.card_section():
-                    with ui.row().classes("w-full items-center justify-between"):
-                        ui.label("Cores").classes("text-sm font-semibold uppercase text-gray-500")
-                        with ui.row().classes("gap-2"):
-                            ui.button(
-                                "Enable all",
-                                on_click=lambda: _set_all_cores(True, core_rows),
-                            ).props("flat dense color=primary")
-                            ui.button(
-                                "Disable all",
-                                on_click=lambda: _set_all_cores(False, core_rows),
-                            ).props("flat dense color=grey")
-                    for idx, (ct, color) in enumerate(_CORE_OPTIONS):
-                        core_rows.append(_build_core_row(idx, ct, color, state))
+            # ── Optimize panel (deck/class, cores, inventory, run) ───────────
+            optimize_panel = ui.column().classes("gap-3 w-full")
+            with optimize_panel:
+                # Deck & class
+                with ui.card().tight().classes("w-full"):
+                    with ui.card_section():
+                        ui.label("Deck & class").classes("text-sm font-semibold uppercase text-gray-500")
+                        with ui.row().classes("w-full items-center gap-3"):
+                            def _on_deck_change(e):
+                                for d in _cfg.DECKS:
+                                    if d.name == e.value:
+                                        state.deck = d
+                                        state.last_result = None
+                                        # New deck = different slot set; old preview
+                                        # assignments no longer apply.
+                                        state.preview_assignments.clear()
+                                        total_label.text = "NDM  —"
+                                        cores_label.text = ""
+                                        verify_label.text = ""
+                                        _render_deck_grid(
+                                            grid_container, state,
+                                            on_preview_change=_on_preview_change,
+                                        )
+                                        if state.view == "preview":
+                                            _preview.build_stats_panel(preview_panel, state)
+                                        return
+                            ui.select(
+                                options=[d.name for d in _cfg.DECKS],
+                                value=state.deck.name,
+                                label="Deck",
+                                on_change=_on_deck_change,
+                            ).classes("flex-grow")
+                            ui.select(
+                                options={CardClass.SHINY.value: "Shiny", CardClass.EVO.value: "Evo"},
+                                value=state.card_class.value,
+                                label="Class",
+                                on_change=lambda e: setattr(state, "card_class", CardClass(e.value)),
+                            ).classes("w-28")
+                        # Mode toggle (Wolds / Vanilla). Switching modes calls
+                        # config.set_mode() which re-merges config.yaml and reloads
+                        # DECKS, so a deck's core_slots reflects the new mode's
+                        # deckmod immediately.
+                        def _on_mode_change(e):
+                            try:
+                                _cfg.set_mode(e.value)
+                            except Exception as exc:  # noqa: BLE001
+                                ui.notify(f"Mode change failed: {exc}", color="negative")
+                                return
+                            state.mode = e.value
+                            state.last_result = None
+                            state.preview_assignments.clear()
+                            # Re-fetch our currently-selected deck from the new DECKS list
+                            # (each Deck's core_slots may have shifted due to deckmod change).
+                            prev_name = state.deck.name
+                            match = next((d for d in _cfg.DECKS if d.name == prev_name), None)
+                            if match is not None:
+                                state.deck = match
+                            else:
+                                state.deck = _cfg.DECKS[0]
+                                ui.notify(
+                                    f"Deck '{prev_name}' not available in {e.value} mode — "
+                                    f"switched to '{state.deck.name}'.",
+                                    color="warning",
+                                )
+                            total_label.text = "NDM  —"
+                            cores_label.text = ""
+                            verify_label.text = ""
+                            _render_deck_grid(
+                                grid_container, state,
+                                on_preview_change=_on_preview_change,
+                            )
+                            if state.view == "preview":
+                                _preview.build_stats_panel(preview_panel, state)
+                            ui.notify(f"Optimizer mode: {e.value}", color="positive")
+                        with ui.row().classes("w-full items-center gap-3 mt-2"):
+                            ui.label("Mode").classes("text-xs text-gray-500")
+                            ui.toggle(
+                                {"wolds": "Wolds", "vanilla": "Vanilla"},
+                                value=state.mode,
+                                on_change=_on_mode_change,
+                            ).props("dense")
 
-            # Inventory
-            inv_inputs: Dict[Tuple[CardType, Color], ui.number] = {}
-            with ui.card().tight().classes("w-full"):
-                with ui.card_section():
-                    with ui.row().classes("w-full items-center justify-between"):
-                        ui.label("Inventory") \
-                            .classes("text-sm font-semibold uppercase text-gray-500")
-                        with ui.row().classes("gap-2"):
-                            ui.button(
-                                "Unlimited (100×)",
-                                on_click=lambda: _apply_preset(100, inv_inputs, state),
-                            ).props("flat dense color=primary")
-                            ui.button(
-                                "Clear",
-                                on_click=lambda: _apply_preset(0, inv_inputs, state),
-                            ).props("flat dense color=grey")
-                    _build_inventory_table(inv_inputs, state)
+                # Cores
+                core_rows: List[Tuple["ui.checkbox", "ui.number", "callable"]] = []
+                with ui.card().tight().classes("w-full"):
+                    with ui.card_section():
+                        with ui.row().classes("w-full items-center justify-between"):
+                            ui.label("Cores").classes("text-sm font-semibold uppercase text-gray-500")
+                            with ui.row().classes("gap-2"):
+                                ui.button(
+                                    "Enable all",
+                                    on_click=lambda: _set_all_cores(True, core_rows),
+                                ).props("flat dense color=primary")
+                                ui.button(
+                                    "Disable all",
+                                    on_click=lambda: _set_all_cores(False, core_rows),
+                                ).props("flat dense color=grey")
+                        for idx, (ct, color) in enumerate(_CORE_OPTIONS):
+                            core_rows.append(_build_core_row(idx, ct, color, state))
 
-            # Run controls (this is where the Run button lives)
-            with ui.card().tight().classes("w-full"):
-                with ui.card_section():
-                    with ui.row().classes("w-full items-center gap-3"):
-                        ui.number(label="SA iter", value=state.n_iter, format="%d", step=10_000,
-                                  on_change=lambda e: setattr(state, "n_iter", int(e.value or 0))) \
-                            .classes("w-32")
-                        ui.number(label="Restarts", value=state.restarts, format="%d", step=1,
-                                  on_change=lambda e: setattr(state, "restarts", int(e.value or 0))) \
-                            .classes("w-28")
-                        run_button = ui.button("Run").props("color=primary unelevated").classes("flex-grow")
-                    # Backend indicator: green if Rust core is loaded, amber if pure-Python fallback.
-                    if _RUST_OK:
-                        ui.label("● Using Rust core (parallel restarts)") \
-                            .style("color:#15803D; font-size:12px; margin-top:6px;")
-                    else:
-                        ui.label("● Using pure-Python fallback — much slower; build with --extra rust") \
-                            .style("color:#B45309; font-size:12px; margin-top:6px;")
+                # Inventory
+                inv_inputs: Dict[Tuple[CardType, Color], ui.number] = {}
+                with ui.card().tight().classes("w-full"):
+                    with ui.card_section():
+                        with ui.row().classes("w-full items-center justify-between"):
+                            ui.label("Inventory") \
+                                .classes("text-sm font-semibold uppercase text-gray-500")
+                            with ui.row().classes("gap-2"):
+                                ui.button(
+                                    "Unlimited (100×)",
+                                    on_click=lambda: _apply_preset(100, inv_inputs, state),
+                                ).props("flat dense color=primary")
+                                ui.button(
+                                    "Clear",
+                                    on_click=lambda: _apply_preset(0, inv_inputs, state),
+                                ).props("flat dense color=grey")
+                        _build_inventory_table(inv_inputs, state)
+
+                # Run controls (this is where the Run button lives)
+                with ui.card().tight().classes("w-full"):
+                    with ui.card_section():
+                        with ui.row().classes("w-full items-center gap-3"):
+                            ui.number(label="SA iter", value=state.n_iter, format="%d", step=10_000,
+                                      on_change=lambda e: setattr(state, "n_iter", int(e.value or 0))) \
+                                .classes("w-32")
+                            ui.number(label="Restarts", value=state.restarts, format="%d", step=1,
+                                      on_change=lambda e: setattr(state, "restarts", int(e.value or 0))) \
+                                .classes("w-28")
+                            run_button = ui.button("Run").props("color=primary unelevated").classes("flex-grow")
+                        # Backend indicator: green if Rust core is loaded, amber if pure-Python fallback.
+                        if _RUST_OK:
+                            ui.label("● Using Rust core (parallel restarts)") \
+                                .style("color:#15803D; font-size:12px; margin-top:6px;")
+                        else:
+                            ui.label("● Using pure-Python fallback — much slower; build with --extra rust") \
+                                .style("color:#B45309; font-size:12px; margin-top:6px;")
+
+            # ── Preview panel (stats sidebar) ─────────────────────────────────
+            # Built lazily on view-switch; pre-built once here so the element
+            # exists for set_visibility() before any state is rendered into it.
+            preview_panel = ui.column().classes("gap-3 w-full")
+            _preview.build_stats_panel(preview_panel, state)
+
+            # Initial visibility based on default view.
+            optimize_panel.set_visibility(state.view == "optimize")
+            preview_panel.set_visibility(state.view == "preview")
 
             # Wire the Run button now that everything else exists.
             # Return the coroutine directly (NOT via asyncio.create_task) so
@@ -525,7 +664,9 @@ def _build_page() -> None:
                     cores_label=cores_label,
                     verify_label=verify_label,
                     grid_container=grid_container,
+                    preview_panel=preview_panel,
                     run_button=run_button,
+                    on_preview_change=_on_preview_change,
                 )
             )
 
@@ -628,7 +769,9 @@ async def _run_optimization(
     cores_label: ui.label,
     verify_label: ui.label,
     grid_container: ui.element,
+    preview_panel: ui.element,
     run_button: ui.button,
+    on_preview_change: callable,
 ) -> None:
     counts = {k: v for k, v in state.inventory_counts.items() if v > 0}
     if not counts:
@@ -662,7 +805,18 @@ async def _run_optimization(
         total_label.text = f"NDM  {result.score:,.2f}"
         cores_label.text = _format_cores(result.cores_used)
         _set_verification_badge(verify_label, result)
-        _render_deck_grid(grid_container, state)
+        # Drop preview assignments whose slot's class family changed under the
+        # new layout (keep-by-(row,col) rule). Refresh the preview stats panel
+        # if the user is currently viewing it.
+        dropped = _preview.reset_assignments_on_run(state)
+        _render_deck_grid(grid_container, state, on_preview_change=on_preview_change)
+        if state.view == "preview":
+            _preview.build_stats_panel(preview_panel, state)
+        if dropped:
+            ui.notify(
+                f"Preview: dropped {dropped} card assignment(s) whose slot family changed.",
+                color="warning",
+            )
         ui.notify("Done.", color="positive")
     except Exception as exc:  # noqa: BLE001
         ui.notify(f"Optimization failed: {exc}", color="negative", multi_line=True)
