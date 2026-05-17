@@ -8,9 +8,11 @@
 //!   * Empty slots after inventory exhaustion become transparent DEAD cards.
 //!   * Restarts run in parallel via rayon.
 
+#[cfg(feature = "python")]
 use pyo3::prelude::*;
 use rand::prelude::*;
 use rand::rngs::SmallRng;
+#[cfg(feature = "python")]
 use rayon::prelude::*;
 use std::collections::HashMap;
 
@@ -18,35 +20,35 @@ use std::collections::HashMap;
 // Card-type constants (must match the Python CardType.value strings)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const ROW:             u8 = 0;
-const COL:             u8 = 1;
-const SURR:            u8 = 2;
-const DIAG:            u8 = 3;
-const DELUXE:          u8 = 4;
-const TYPELESS:        u8 = 5;
-const DIR_GREED_UP:    u8 = 6;
-const DIR_GREED_DOWN:  u8 = 7;
-const DIR_GREED_LEFT:  u8 = 8;
-const DIR_GREED_RIGHT: u8 = 9;
-const DIR_GREED_NE:    u8 = 10;
-const DIR_GREED_NW:    u8 = 11;
-const DIR_GREED_SE:    u8 = 12;
-const DIR_GREED_SW:    u8 = 13;
-const EVO_GREED:       u8 = 14;
-const SURR_GREED:      u8 = 15;
-const DEAD:            u8 = 16;
+pub(crate) const ROW:             u8 = 0;
+pub(crate) const COL:             u8 = 1;
+pub(crate) const SURR:            u8 = 2;
+pub(crate) const DIAG:            u8 = 3;
+pub(crate) const DELUXE:          u8 = 4;
+pub(crate) const TYPELESS:        u8 = 5;
+pub(crate) const DIR_GREED_UP:    u8 = 6;
+pub(crate) const DIR_GREED_DOWN:  u8 = 7;
+pub(crate) const DIR_GREED_LEFT:  u8 = 8;
+pub(crate) const DIR_GREED_RIGHT: u8 = 9;
+pub(crate) const DIR_GREED_NE:    u8 = 10;
+pub(crate) const DIR_GREED_NW:    u8 = 11;
+pub(crate) const DIR_GREED_SE:    u8 = 12;
+pub(crate) const DIR_GREED_SW:    u8 = 13;
+pub(crate) const EVO_GREED:       u8 = 14;
+pub(crate) const SURR_GREED:      u8 = 15;
+pub(crate) const DEAD:            u8 = 16;
 
-const N_TYPES: usize = 17;
+pub(crate) const N_TYPES: usize = 17;
 
 // Colors
-const RED:    u8 = 0;
-const GREEN:  u8 = 1;
-const BLUE:   u8 = 2;
-const YELLOW: u8 = 3;
-const N_COLORS: usize = 4;
+pub(crate) const RED:    u8 = 0;
+pub(crate) const GREEN:  u8 = 1;
+pub(crate) const BLUE:   u8 = 2;
+pub(crate) const YELLOW: u8 = 3;
+pub(crate) const N_COLORS: usize = 4;
 
 // Sentinel — DEAD cards and "no color core" both use this.
-const COLOR_NONE: u8 = 255;
+pub(crate) const COLOR_NONE: u8 = 255;
 
 // Cores
 const CORE_PURE:        u8 = 0;
@@ -60,7 +62,7 @@ const CORE_DELUXE:      u8 = 5;
 // String ↔ u8 conversions (Python boundary only — never on the hot path)
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn card_type_from_str(s: &str) -> u8 {
+pub(crate) fn card_type_from_str(s: &str) -> u8 {
     match s {
         "row"             => ROW,
         "col"             => COL,
@@ -83,7 +85,7 @@ fn card_type_from_str(s: &str) -> u8 {
     }
 }
 
-fn card_type_to_str(t: u8) -> &'static str {
+pub(crate) fn card_type_to_str(t: u8) -> &'static str {
     match t {
         ROW             => "row",
         COL             => "col",
@@ -106,7 +108,7 @@ fn card_type_to_str(t: u8) -> &'static str {
     }
 }
 
-fn color_from_str(s: &str) -> u8 {
+pub(crate) fn color_from_str(s: &str) -> u8 {
     match s {
         "red"    => RED,
         "green"  => GREEN,
@@ -117,7 +119,7 @@ fn color_from_str(s: &str) -> u8 {
     }
 }
 
-fn color_to_str(c: u8) -> &'static str {
+pub(crate) fn color_to_str(c: u8) -> &'static str {
     match c {
         RED        => "red",
         GREEN      => "green",
@@ -128,7 +130,7 @@ fn color_to_str(c: u8) -> &'static str {
     }
 }
 
-fn core_from_str(s: &str) -> u8 {
+pub(crate) fn core_from_str(s: &str) -> u8 {
     match s {
         "pure"        => CORE_PURE,
         "equilibrium" => CORE_EQUILIBRIUM,
@@ -163,7 +165,7 @@ fn is_greed(t: u8) -> bool {
 // Deck geometry + sim config
 // ─────────────────────────────────────────────────────────────────────────────
 
-struct DeckGeom {
+pub(crate) struct DeckGeom {
     n: usize,
     row_of: Vec<i32>,
     col_of: Vec<i32>,
@@ -187,29 +189,29 @@ struct DeckGeom {
     col_span: usize,
 }
 
-struct SimConfig {
-    mult_dir_vert: f64,
-    mult_dir_horiz: f64,
-    mult_evo_greed: f64,
-    mult_surr_greed: f64,
-    mult_dir_diag_up: f64,
-    mult_dir_diag_down: f64,
-    mult_pure_base: f64,
-    mult_pure_scale: f64,
-    mult_equilibrium: f64,
-    mult_foil: f64,
-    mult_steadfast: f64,
-    mult_color: f64,
-    mult_deluxe_flat: f64,
-    mult_deluxe_core_base: f64,
-    mult_deluxe_core_scale: f64,
-    greed_additive: bool,
-    additive_cores: bool,
-    is_shiny: bool,
+pub(crate) struct SimConfig {
+    pub mult_dir_vert: f64,
+    pub mult_dir_horiz: f64,
+    pub mult_evo_greed: f64,
+    pub mult_surr_greed: f64,
+    pub mult_dir_diag_up: f64,
+    pub mult_dir_diag_down: f64,
+    pub mult_pure_base: f64,
+    pub mult_pure_scale: f64,
+    pub mult_equilibrium: f64,
+    pub mult_foil: f64,
+    pub mult_steadfast: f64,
+    pub mult_color: f64,
+    pub mult_deluxe_flat: f64,
+    pub mult_deluxe_core_base: f64,
+    pub mult_deluxe_core_scale: f64,
+    pub greed_additive: bool,
+    pub additive_cores: bool,
+    pub is_shiny: bool,
 }
 
 #[derive(Clone, Copy)]
-struct CoreData {
+pub(crate) struct CoreData {
     core_type: u8,
     color:     u8,        // COLOR_NONE unless core_type == CORE_COLOR
     override_: f64,       // -1.0 == no override
@@ -222,14 +224,14 @@ impl CoreData {
 // Cores list packed for fast iteration. simulate() reads `list` and
 // `color_core_color` / `foil_active` directly; per-card combination math is
 // done inside the kernel.
-struct CoresPack {
+pub(crate) struct CoresPack {
     list:             Vec<CoreData>,
     color_core_color: u8,    // COLOR_NONE if absent
     foil_active:      bool,
 }
 
 impl CoresPack {
-    fn build(specs: &[CoreData], _cfg: &SimConfig) -> Self {
+    pub(crate) fn build(specs: &[CoreData], _cfg: &SimConfig) -> Self {
         let mut color_core_color = COLOR_NONE;
         let mut foil_active = false;
         for s in specs {
@@ -521,7 +523,7 @@ fn initial_fill(
 // SA — one restart
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn sa_one_restart(
+pub(crate) fn sa_one_restart(
     geom:       &DeckGeom,
     cores:      &CoresPack,
     cfg:        &SimConfig,
@@ -617,9 +619,121 @@ fn sa_one_restart(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PyO3 entry point
+// Pure-Rust orchestrator — used by both PyO3 and wasm-bindgen wrappers.
+// Takes already-typed inputs (no Strings, no PyResult). Restart loop is
+// parallel under `python` (rayon) and serial under `wasm`.
 // ─────────────────────────────────────────────────────────────────────────────
 
+pub(crate) struct InventoryRun<'a> {
+    pub slots:      &'a [(i32, i32)],
+    pub row_peers:  Vec<Vec<usize>>,
+    pub col_peers:  Vec<Vec<usize>>,
+    pub surr_peers: Vec<Vec<usize>>,
+    pub diag_peers: Vec<Vec<usize>>,
+    pub n_arcane:   usize,
+    pub is_shiny:   bool,
+    pub inventory:  Vec<(u8, u8, u32)>,   // (type, color, count) — pre-typed
+    pub cores:      Vec<(u8, u8, f64)>,   // (type, color, override<0 = none)
+    pub n_iter:     usize,
+    pub restarts:   usize,
+    pub cfg_mults:  SimConfig,            // mults + greed_additive + additive_cores + is_shiny
+}
+
+pub(crate) fn run_sa_inventory_core(run: InventoryRun<'_>) -> (Vec<(u8, u8)>, f64) {
+    let n = run.slots.len();
+
+    let slot_map: HashMap<(i32, i32), usize> =
+        run.slots.iter().enumerate().map(|(i, &p)| (p, i)).collect();
+    let row_of: Vec<i32> = run.slots.iter().map(|&(r, _)| r).collect();
+    let col_of: Vec<i32> = run.slots.iter().map(|&(_, c)| c).collect();
+
+    let dir = |i: usize, dr: i32, dc: i32| -> Option<usize> {
+        slot_map.get(&(run.slots[i].0 + dr, run.slots[i].1 + dc)).copied()
+    };
+    let dir_up:    Vec<Option<usize>> = (0..n).map(|i| dir(i, -1,  0)).collect();
+    let dir_down:  Vec<Option<usize>> = (0..n).map(|i| dir(i,  1,  0)).collect();
+    let dir_left:  Vec<Option<usize>> = (0..n).map(|i| dir(i,  0, -1)).collect();
+    let dir_right: Vec<Option<usize>> = (0..n).map(|i| dir(i,  0,  1)).collect();
+    let dir_ne:    Vec<Option<usize>> = (0..n).map(|i| dir(i, -1,  1)).collect();
+    let dir_nw:    Vec<Option<usize>> = (0..n).map(|i| dir(i, -1, -1)).collect();
+    let dir_se:    Vec<Option<usize>> = (0..n).map(|i| dir(i,  1,  1)).collect();
+    let dir_sw:    Vec<Option<usize>> = (0..n).map(|i| dir(i,  1, -1)).collect();
+
+    let row_min = *row_of.iter().min().unwrap_or(&0);
+    let row_max = *row_of.iter().max().unwrap_or(&0);
+    let col_min = *col_of.iter().min().unwrap_or(&0);
+    let col_max = *col_of.iter().max().unwrap_or(&0);
+
+    let geom = DeckGeom {
+        n,
+        row_of,
+        col_of,
+        row_peers: run.row_peers,
+        col_peers: run.col_peers,
+        surr_peers: run.surr_peers,
+        diag_peers: run.diag_peers,
+        dir_up, dir_down, dir_left, dir_right,
+        dir_ne, dir_nw, dir_se, dir_sw,
+        n_arcane: run.n_arcane,
+        row_min,
+        row_span: (row_max - row_min + 1) as usize,
+        col_min,
+        col_span: (col_max - col_min + 1) as usize,
+    };
+
+    let mut cfg = run.cfg_mults;
+    cfg.is_shiny = run.is_shiny;
+
+    let core_specs: Vec<CoreData> = run.cores.iter()
+        .map(|&(t, c, o)| CoreData { core_type: t, color: c, override_: o })
+        .collect();
+    let cores_pack = CoresPack::build(&core_specs, &cfg);
+
+    let mut inv_flat = vec![0u32; N_TYPES * N_COLORS];
+    for &(t, c, n) in &run.inventory {
+        if c == COLOR_NONE { continue; }
+        inv_flat[t as usize * N_COLORS + c as usize] += n;
+    }
+
+    let mut options: Vec<(u8, u8)> = Vec::new();
+    for t_idx in 0..N_TYPES {
+        for c_idx in 0..N_COLORS {
+            if inv_flat[t_idx * N_COLORS + c_idx] > 0 {
+                options.push((t_idx as u8, c_idx as u8));
+            }
+        }
+    }
+    options.push((DEAD, COLOR_NONE));
+
+    let restarts = run.restarts.max(1);
+    let n_iter = run.n_iter;
+
+    // Restarts: parallel under python (rayon), serial under wasm.
+    let restart_fn = |i: usize| -> (Vec<(u8, u8)>, f64) {
+        let mut seed_rng = SmallRng::from_entropy();
+        let seed: u64 = seed_rng.gen::<u64>()
+            ^ (i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        sa_one_restart(&geom, &cores_pack, &cfg, &inv_flat, &options,
+                       n_iter, 100.0, 0.5, seed)
+    };
+
+    #[cfg(feature = "python")]
+    let results: Vec<(Vec<(u8, u8)>, f64)> =
+        (0..restarts).into_par_iter().map(restart_fn).collect();
+    #[cfg(not(feature = "python"))]
+    let results: Vec<(Vec<(u8, u8)>, f64)> =
+        (0..restarts).map(restart_fn).collect();
+
+    results.into_iter()
+        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+        .expect("at least one restart")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PyO3 entry point — thin marshalling layer over run_sa_inventory_core.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[cfg(feature = "python")]
 #[pyfunction]
 #[pyo3(signature = (
     slots, row_peers, col_peers, surr_peers, diag_peers,
@@ -640,8 +754,8 @@ pub fn run_sa_inventory(
     diag_peers:             Vec<Vec<usize>>,
     n_arcane:               usize,
     is_shiny:               bool,
-    inventory:              Vec<(String, String, u32)>,  // (type, color, count)
-    cores:                  Vec<(String, String, f64)>,  // (type, color, override<0 = none)
+    inventory:              Vec<(String, String, u32)>,
+    cores:                  Vec<(String, String, f64)>,
     n_iter:                 usize,
     restarts:               usize,
     mult_dir_vert:          f64,
@@ -662,110 +776,37 @@ pub fn run_sa_inventory(
     greed_additive:         bool,
     additive_cores:         bool,
 ) -> PyResult<(Vec<(String, String)>, f64)> {
-    let n = slots.len();
+    // Pre-type inventory + cores so the orchestrator stays pure-Rust.
+    let inventory_u8: Vec<(u8, u8, u32)> = inventory.iter()
+        .map(|(t, c, n)| (card_type_from_str(t), color_from_str(c), *n))
+        .collect();
+    let cores_u8: Vec<(u8, u8, f64)> = cores.iter()
+        .map(|(t, c, o)| (core_from_str(t), color_from_str(c), *o))
+        .collect();
 
-    let slot_map: HashMap<(i32, i32), usize> =
-        slots.iter().enumerate().map(|(i, &p)| (p, i)).collect();
-    let row_of: Vec<i32> = slots.iter().map(|&(r, _)| r).collect();
-    let col_of: Vec<i32> = slots.iter().map(|&(_, c)| c).collect();
-
-    let dir = |i: usize, dr: i32, dc: i32| -> Option<usize> {
-        slot_map.get(&(slots[i].0 + dr, slots[i].1 + dc)).copied()
-    };
-    let dir_up:    Vec<Option<usize>> = (0..n).map(|i| dir(i, -1,  0)).collect();
-    let dir_down:  Vec<Option<usize>> = (0..n).map(|i| dir(i,  1,  0)).collect();
-    let dir_left:  Vec<Option<usize>> = (0..n).map(|i| dir(i,  0, -1)).collect();
-    let dir_right: Vec<Option<usize>> = (0..n).map(|i| dir(i,  0,  1)).collect();
-    let dir_ne:    Vec<Option<usize>> = (0..n).map(|i| dir(i, -1,  1)).collect();
-    let dir_nw:    Vec<Option<usize>> = (0..n).map(|i| dir(i, -1, -1)).collect();
-    let dir_se:    Vec<Option<usize>> = (0..n).map(|i| dir(i,  1,  1)).collect();
-    let dir_sw:    Vec<Option<usize>> = (0..n).map(|i| dir(i,  1, -1)).collect();
-
-    let row_min = *row_of.iter().min().unwrap_or(&0);
-    let row_max = *row_of.iter().max().unwrap_or(&0);
-    let col_min = *col_of.iter().min().unwrap_or(&0);
-    let col_max = *col_of.iter().max().unwrap_or(&0);
-
-    let geom = DeckGeom {
-        n,
-        row_of,
-        col_of,
-        row_peers,
-        col_peers,
-        surr_peers,
-        diag_peers,
-        dir_up, dir_down, dir_left, dir_right,
-        dir_ne, dir_nw, dir_se, dir_sw,
-        n_arcane,
-        row_min,
-        row_span: (row_max - row_min + 1) as usize,
-        col_min,
-        col_span: (col_max - col_min + 1) as usize,
-    };
-
-    let cfg = SimConfig {
+    let cfg_mults = SimConfig {
         mult_dir_vert, mult_dir_horiz, mult_evo_greed, mult_surr_greed,
         mult_dir_diag_up, mult_dir_diag_down,
         mult_pure_base, mult_pure_scale,
         mult_equilibrium, mult_foil, mult_steadfast, mult_color,
         mult_deluxe_flat, mult_deluxe_core_base, mult_deluxe_core_scale,
-        greed_additive, additive_cores, is_shiny,
+        greed_additive, additive_cores,
+        is_shiny,            // also set by orchestrator from `run.is_shiny`
     };
 
-    // Pack cores
-    let core_specs: Vec<CoreData> = cores
-        .iter()
-        .map(|(t, c, o)| CoreData {
-            core_type: core_from_str(t),
-            color:     color_from_str(c),
-            override_: *o,
-        })
-        .collect();
-    let cores_pack = CoresPack::build(&core_specs, &cfg);
+    let run = InventoryRun {
+        slots:      &slots,
+        row_peers, col_peers, surr_peers, diag_peers,
+        n_arcane, is_shiny,
+        inventory:  inventory_u8,
+        cores:      cores_u8,
+        n_iter, restarts,
+        cfg_mults,
+    };
+    let (best_asgn, best_score) = run_sa_inventory_core(run);
 
-    // Pack inventory into flat array
-    let mut inv_flat = vec![0u32; N_TYPES * N_COLORS];
-    for (t_s, c_s, n) in &inventory {
-        let t = card_type_from_str(t_s) as usize;
-        let c = color_from_str(c_s);
-        if c == COLOR_NONE { continue; }   // skip malformed entries
-        inv_flat[t * N_COLORS + c as usize] += *n;
-    }
-
-    // Build proposal options list: every owned (type, color) + DEAD sentinel.
-    let mut options: Vec<(u8, u8)> = Vec::with_capacity(inventory.len() + 1);
-    for t_idx in 0..N_TYPES {
-        for c_idx in 0..N_COLORS {
-            if inv_flat[t_idx * N_COLORS + c_idx] > 0 {
-                options.push((t_idx as u8, c_idx as u8));
-            }
-        }
-    }
-    options.push((DEAD, COLOR_NONE));
-
-    // Restarts in parallel via rayon. Seeds: hash of (i, n_iter) so runs are
-    // deterministic per restart but diverge across restarts.
-    let restarts = restarts.max(1);
-    let results: Vec<(Vec<(u8, u8)>, f64)> = (0..restarts)
-        .into_par_iter()
-        .map(|i| {
-            // Use thread-local entropy XOR'd with restart index for a robust seed.
-            let mut seed_rng = SmallRng::from_entropy();
-            let seed: u64 = seed_rng.gen::<u64>() ^ (i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
-            sa_one_restart(&geom, &cores_pack, &cfg, &inv_flat, &options, n_iter, 100.0, 0.5, seed)
-        })
-        .collect();
-
-    // Pick best result.
-    let (best_asgn, best_score) = results
-        .into_iter()
-        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
-        .expect("at least one restart");
-
-    let result_strs: Vec<(String, String)> = best_asgn
-        .iter()
+    let result_strs: Vec<(String, String)> = best_asgn.iter()
         .map(|&(t, c)| (card_type_to_str(t).to_owned(), color_to_str(c).to_owned()))
         .collect();
-
     Ok((result_strs, best_score))
 }

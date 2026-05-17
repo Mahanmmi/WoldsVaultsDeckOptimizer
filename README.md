@@ -94,7 +94,6 @@ The first run with `--extra rust` will compile `ndm_core` (takes a minute or two
 | Pure Python, Vanilla mode                          | `uv run optimize-py --mode vanilla`           | No          |
 | Rust-accelerated, Wold's mode                      | `uv run --extra rust optimize`                | Yes         |
 | Rust-accelerated, Vanilla mode                     | `uv run --extra rust optimize --mode vanilla` | Yes         |
-| Interactive GUI (inventory optimizer, single deck) | `uv run --extra rust optimize-gui`            | Recommended |
 | Show CLI help for the optimizer                    | `uv run optimize-py --help`                   | No          |
 
 Anything after the command name is passed straight through to the optimizer, so no `--` separator is needed.
@@ -118,6 +117,36 @@ The script's tunable constants live near the top of `NDM_Optimizer_Rust.py`. Aft
 
 ---
 
-## Interactive GUI
+## Interactive web app (browser, no install)
 
-`uv run --extra rust optimize-gui` launches a local web app (opens automatically in your browser) for optimizing a single deck against a concrete card inventory you specify — type, color, and count per stack — rather than the unlimited-inventory model the spreadsheet pipeline uses. Pick a deck, toggle cores and overrides, fill in (or click *Unlimited 100×*) the inventory table, hit Run; the deck repaints with the optimizer's chosen placement and per-slot NDM. Click any tile for the full math breakdown. The Wolds/Vanilla toggle inside the app switches modes live. Rust is recommended — the pure-Python fallback works but is much slower per iteration.
+The interactive single-deck inventory optimizer lives at
+**https://poor-mans-physicist.github.io/woldsvaultsdeckoptimizer/**.
+It runs entirely in the browser — the simulated annealer is compiled to WASM and
+runs in a Web Worker, so nothing is sent to a server. Pick a deck, toggle cores
+and overrides, fill in the inventory table, hit Run; the deck repaints with the
+optimizer's chosen placement and per-slot NDM. Click any tile for the full math
+breakdown. Switch to the **Preview** tab to assign concrete stat cards to each
+scoring slot and see the resulting player-stat totals.
+
+### Running the web app locally
+
+You need `uv` (for the data bundle), `cargo` + `wasm-pack` (for the WASM core),
+and `node` (for the Svelte/Vite app).
+
+```bash
+# 1. Generate the static data bundle (config/decks/modifiers JSON)
+uv run python scripts/build_data.py
+
+# 2. Build the WASM core into web/src/wasm/
+(cd ndm_core && wasm-pack build --target web --release \
+   --out-dir ../web/src/wasm -- --no-default-features --features wasm)
+
+# 3. Run the dev server
+cd web && npm install && npm run dev
+```
+
+### Deployment
+
+Pushing to `main` triggers `.github/workflows/deploy.yml`, which runs the three
+steps above and publishes the resulting `web/dist/` to GitHub Pages. No
+server-side runtime is needed.

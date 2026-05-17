@@ -1,0 +1,99 @@
+name: Build & deploy to GitHub Pages
+
+# Triggers
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:        # manual run from the Actions tab
+
+# GitHub Pages permissions / single-flight concurrency.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Python (build_data.py) ──────────────────────────────────────
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Generate static data bundle
+        run: uv run python scripts/build_data.py
+
+      # ── Rust → WASM ────────────────────────────────────────────────
+      - name: Set up Rust (stable + wasm32 target)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo registry & build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ndm_core/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('ndm_core/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked --version 0.13.1
+
+      - name: Build wasm crate (browser target)
+        working-directory: ndm_core
+        # Mirror the local dev command. The `--` separates wasm-pack flags
+        # from cargo flags so `--no-default-features --features wasm` actually
+        # reaches cargo.
+        run: wasm-pack build --target web --release --out-dir ../web/src/wasm -- --no-default-features --features wasm
+
+      # ── Node / Vite (Svelte app) ───────────────────────────────────
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web deps
+        working-directory: web
+        run: npm ci
+
+      - name: Build site
+        working-directory: web
+        # VITE_BASE matches the project-pages URL prefix
+        # (`/<repo>/`). Override via repository secrets/vars if you ever
+        # move to a custom domain or user-page.
+        env:
+          VITE_BASE: /${{ github.event.repository.name }}/
+        run: npm run build
+
+      # ── Pages artifact ─────────────────────────────────────────────
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

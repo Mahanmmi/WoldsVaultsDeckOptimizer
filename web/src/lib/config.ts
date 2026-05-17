@@ -1,0 +1,71 @@
+// Resolved-config loader. Reads the build-time bundle `public/config.json`
+// (emitted by `scripts/build_data.py`) and exposes a typed view per mode.
+//
+// Mirrors the UPPERCASE constants in src/config.py — these are what the
+// candidate-core enumerator and breakdown re-score need.
+
+export interface ResolvedConfig {
+  deckmod: number;
+  excluded_decks: string[];
+
+  greed: {
+    dir_vert: number;
+    dir_horiz: number;
+    evo: number;
+    surr: number;
+    dir_diag_up: number;
+    dir_diag_down: number;
+  };
+
+  cores: {
+    pure_base: number;
+    pure_scale: number;
+    equilibrium: number;
+    foil: number;
+    steadfast: number;
+    color: number;
+  };
+
+  deluxe: {
+    allow: boolean;
+    flat: number;
+    core_base: number;
+    core_scale: number;
+  };
+
+  stacking: {
+    greed_additive: boolean;
+    additive_cores: boolean;
+  };
+
+  shiny: {
+    positional: boolean;
+  };
+
+  constraints: {
+    deluxe_counted_as_regular: boolean;
+  };
+}
+
+export interface ConfigBundle {
+  default_mode: string;
+  modes: Record<string, ResolvedConfig>;
+}
+
+let _bundle: ConfigBundle | null = null;
+
+/** Fetch and cache the build-time config bundle. */
+export async function loadConfigBundle(baseUrl: string): Promise<ConfigBundle> {
+  if (_bundle) return _bundle;
+  const res = await fetch(`${baseUrl}config.json`);
+  if (!res.ok) throw new Error(`Failed to load config.json: ${res.status}`);
+  _bundle = await res.json();
+  return _bundle!;
+}
+
+/** Pick one mode's resolved config; throws if unknown. */
+export function getMode(bundle: ConfigBundle, mode: string): ResolvedConfig {
+  const cfg = bundle.modes[mode];
+  if (!cfg) throw new Error(`Unknown mode '${mode}' (have: ${Object.keys(bundle.modes).join(", ")})`);
+  return cfg;
+}
