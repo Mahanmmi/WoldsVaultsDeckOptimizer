@@ -2,6 +2,7 @@
 // The COLOR core gets one row per color (game allows one in inventory per color).
 
 import { Color, CoreType } from "./types";
+import type { ResolvedConfig } from "./config";
 
 export interface CoreOption {
   coreType: CoreType;
@@ -28,4 +29,25 @@ export function coreLabel(opt: CoreOption): string {
     .split("_")
     .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
     .join(" ");
+}
+
+/**
+ * Numeric default the optimizer would use when the user leaves the override
+ * field blank. For PURE and DELUXE_CORE the override replaces only the scale
+ * term (formula stays `base + scale × n`), so we surface the scale itself.
+ */
+export function coreDefaultValue(opt: CoreOption, cfg: ResolvedConfig): number {
+  switch (opt.coreType) {
+    case CoreType.PURE:        return cfg.cores.pure_scale;
+    case CoreType.DELUXE_CORE: return cfg.deluxe.core_scale;
+    case CoreType.EQUILIBRIUM: return cfg.cores.equilibrium;
+    case CoreType.STEADFAST:   return cfg.cores.steadfast;
+    case CoreType.FOIL:        return cfg.cores.foil;
+    case CoreType.COLOR:       return cfg.cores.color;
+  }
+}
+
+/** Numeric default rendered as placeholder text in the override input. */
+export function coreDefaultPlaceholder(opt: CoreOption, cfg: ResolvedConfig): string {
+  return coreDefaultValue(opt, cfg).toFixed(3);
 }

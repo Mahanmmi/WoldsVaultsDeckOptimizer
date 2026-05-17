@@ -1,6 +1,6 @@
 <script lang="ts">
   import { app, setAllCores } from "../lib/state.svelte";
-  import { CORE_OPTIONS, coreLabel } from "../lib/coreOptions";
+  import { CORE_OPTIONS, coreLabel, coreDefaultPlaceholder } from "../lib/coreOptions";
 
   function setOverride(i: number, raw: string): void {
     const v = raw.trim();
@@ -27,7 +27,7 @@
         type="number"
         class="override"
         step="0.05"
-        placeholder="override"
+        placeholder={app.cfg ? coreDefaultPlaceholder(opt, app.cfg) : "override"}
         value={app.coreState[i].override ?? ""}
         oninput={(e) => setOverride(i, (e.currentTarget as HTMLInputElement).value)}
       />
