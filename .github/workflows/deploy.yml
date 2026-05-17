@@ -3,7 +3,7 @@ name: Build & deploy to GitHub Pages
 # Triggers
 on:
   push:
-    branches: [main]
+    branches: [main, feat-wasm-engine]
   workflow_dispatch:        # manual run from the Actions tab
 
 # GitHub Pages permissions / single-flight concurrency.
